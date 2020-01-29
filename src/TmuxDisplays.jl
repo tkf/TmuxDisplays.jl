@@ -27,6 +27,8 @@ function Base.display(tmux::TmuxDisplay, mime::MIME"text/plain", x)
     return
 end
 
+Base.display(tmux::TmuxDisplay, x) = display(tmux, MIME"text/plain"(), x)
+
 Base.isopen(tmux::TmuxDisplay) = success(`tmux has-session -t $(tmux.pane_id)`)
 
 function Base.close(tmux::TmuxDisplay)
@@ -122,7 +124,7 @@ Display `x` in a separate pane of current tmux session.  Return the
 """
 function tmuxdisplay(x)
     tmux = tmuxdisplay()
-    display(tmux, MIME"text/plain"(), x)
+    display(tmux, x)
     return tmux
 end
 
