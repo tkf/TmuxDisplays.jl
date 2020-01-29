@@ -56,6 +56,12 @@ end
 
 make_tty(path::AbstractString) = Base.TTY(fd(Filesystem.open(path, Filesystem.JL_O_WRONLY)))
 
+"""
+    TmuxDisplays.split_window() :: TmuxDisplay
+
+Use `tmux split-window` to create a new pane that is used as an
+external display.
+"""
 function split_window()
     waiter_path = tmpfifo()
     cmd = `
