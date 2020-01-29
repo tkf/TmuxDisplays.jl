@@ -37,6 +37,15 @@ function Base.close(tmux::TmuxDisplay)
     cleanup_tmux(tmux)
 end
 
+function Base.show(io::IO, ::MIME"text/plain", tmux::TmuxDisplay)
+    print(io, "TmuxDisplay: pane ", tmux.pane_id, ' ')
+    if isopen(tmux)
+        printstyled(io, "(open)"; color=:green)
+    else
+        printstyled(io, "(closed)"; color=:red)
+    end
+end
+
 struct Lockable{T,L}
     value::T
     lock::L
