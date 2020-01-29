@@ -100,6 +100,7 @@ Return the default `TmuxDisplay` instance.  Create one if it does not
 exist.
 """
 function tmuxdisplay()
+    cleanupall()
     global DEFAULT_DISPLAY
     if DEFAULT_DISPLAY === nothing || !isopen(DEFAULT_DISPLAY)
         DEFAULT_DISPLAY = split_window()
@@ -131,6 +132,17 @@ function closeall()
         while !isempty(d)
             (_, tmux) = pop!(d)
             close(tmux)
+        end
+    end
+end
+
+# TODO: get rid of this by using another FIFO used in the "opposite"
+# direction; i.e., the process inside `tmux` tries to _write_ to it
+# and then the Julia side tries to read.
+function cleanupall()
+    lock(DISPLAYS) do d
+        for (pane_id, tmux) in collect(d)
+            isopen(tmux) || close(tmux)
         end
     end
 end
