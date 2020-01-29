@@ -32,6 +32,7 @@ Base.isopen(tmux::TmuxDisplay) = success(`tmux has-session -t $(tmux.pane_id)`)
 function Base.close(tmux::TmuxDisplay)
     close(tmux.waiter_fifo)
     close(tmux.tty)
+    cleanup_tmux(tmux)
 end
 
 struct Lockable{T,L}
@@ -41,7 +42,7 @@ end
 
 Base.lock(f, lockable::Lockable) = lock(() -> f(lockable.value), lockable.lock)
 
-const DISPLAYS = Lockable(Dict{String,WeakRef}(), ReentrantLock())
+const DISPLAYS = Lockable(Dict{String,TmuxDisplay}(), ReentrantLock())
 
 # Wrap C function?
 mkfifo(path::AbstractString) = run(`mkfifo $path`)
@@ -74,13 +75,7 @@ function split_window()
         make_tty(pane_tty),
     )
     lock(DISPLAYS) do d
-        d[tmux.pane_id] = WeakRef(tmux)
-    end
-    let waiter_fifo = tmux.waiter_fifo,
-        tmux = (waiter_path = tmux.waiter_path, pane_id = tmux.pane_id)
-        finalizer(waiter_fifo) do _
-            @async cleanup_tmux(tmux)
-        end
+        d[tmux.pane_id] = tmux
     end
     return tmux
 end
@@ -88,7 +83,6 @@ end
 function cleanup_tmux(tmux)
     try
         rm(tmux.waiter_path, force = true)
-        # close(tmux)
         lock(DISPLAYS) do d
             pop!(d, tmux.pane_id, nothing)
         end
@@ -134,12 +128,9 @@ function closeall()
     global DEFAULT_DISPLAY
     DEFAULT_DISPLAY = nothing
     lock(DISPLAYS) do d
-        for (pane_id, ref) in collect(d)
-            tmux = ref.value
-            tmux === nothing && continue
+        while !isempty(d)
+            (_, tmux) = pop!(d)
             close(tmux)
-            cleanup_tmux(tmux)
-            pop!(d, pane_id, nothing)
         end
     end
 end
