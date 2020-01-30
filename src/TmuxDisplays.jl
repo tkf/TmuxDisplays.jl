@@ -51,9 +51,12 @@ struct Lockable{T,L}
     lock::L
 end
 
+Lockable(value) = Lockable(value, ReentrantLock())
+
 Base.lock(f, lockable::Lockable) = lock(() -> f(lockable.value), lockable.lock)
 
-const DISPLAYS = Lockable(Dict{String,TmuxDisplay}(), ReentrantLock())
+const DISPLAYS = Lockable(Dict{String,TmuxDisplay}())
+const DEFAULT_DISPLAY = Lockable(Ref{Union{Nothing,TmuxDisplay}}(nothing))
 
 # Wrap C function?
 mkfifo(path::AbstractString) = run(`mkfifo $path`)
@@ -108,8 +111,6 @@ function cleanup_tmux(tmux)
     end
 end
 
-DEFAULT_DISPLAY = nothing
-
 """
     tmuxdisplay() :: TmuxDisplay
 
@@ -118,11 +119,13 @@ exist.
 """
 function tmuxdisplay()
     cleanupall()
-    global DEFAULT_DISPLAY
-    if DEFAULT_DISPLAY === nothing || !isopen(DEFAULT_DISPLAY)
-        DEFAULT_DISPLAY = split_window()
+    lock(DEFAULT_DISPLAY) do ref
+        d = ref[]
+        if d === nothing || !isopen(d)
+            ref[] = d = split_window()
+        end
+        return d
     end
-    return DEFAULT_DISPLAY
 end
 
 """
@@ -143,8 +146,9 @@ end
 Close all `TmuxDisplay`s.
 """
 function closeall()
-    global DEFAULT_DISPLAY
-    DEFAULT_DISPLAY = nothing
+    lock(DEFAULT_DISPLAY) do ref
+        ref[] = nothing
+    end
     lock(DISPLAYS) do d
         while !isempty(d)
             (_, tmux) = pop!(d)
