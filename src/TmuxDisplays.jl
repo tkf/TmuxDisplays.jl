@@ -7,7 +7,7 @@ using Base: Filesystem
 struct TmuxDisplay <: AbstractDisplay
     pane_id::String
     pane_pid::Int
-    waiter_fifo::IOStream
+    waiter_fifo::Base.PipeEndpoint
     waiter_path::String
     tty::Base.TTY
 end
@@ -31,7 +31,17 @@ Base.display(tmux::TmuxDisplay, x) = display(tmux, MIME"text/plain"(), x)
 
 Base.isopen(tmux::TmuxDisplay) = success(`tmux has-session -t $(tmux.pane_id)`)
 
+function silent_run(cmd, msg)
+    io = IOBuffer()
+    success(pipeline(cmd; stdout=io, stderr=io)) ||
+        @debug(
+            "$cmd failed to run. ($msg)",
+            output = Text(chomp(String(take!(io))))
+        )
+end
+
 function Base.close(tmux::TmuxDisplay)
+    silent_run(`tmux kill-pane -t $(tmux.pane_id)`, "already closed?")
     close(tmux.waiter_fifo)
     close(tmux.tty)
     cleanup_tmux(tmux)
@@ -68,6 +78,9 @@ function tmpfifo()
     return path
 end
 
+open_pipe(path::AbstractString) =
+    Base.PipeEndpoint(fd(Filesystem.open(path, Filesystem.JL_O_RDONLY)))
+
 make_tty(path::AbstractString) = Base.TTY(fd(Filesystem.open(path, Filesystem.JL_O_WRONLY)))
 
 """
@@ -84,20 +97,41 @@ function split_window()
     -d
     -P
     -F '#{pane_id} #{pane_pid} #{pane_tty}'
-    "cat $waiter_path"
+    "sleep 2147483647d > $waiter_path"
     `
     pane_id, pane_pid, pane_tty = split(read(cmd, String))
     tmux = TmuxDisplay(
         pane_id,
         parse(Int, pane_pid),
-        open(waiter_path, write = true),
+        open_pipe(waiter_path),
         waiter_path,
         make_tty(pane_tty),
     )
     lock(DISPLAYS) do d
         d[tmux.pane_id] = tmux
     end
+    @debug "Created: $(sprint(show, "text/plain", tmux))"
+
+    # Cleanup `DISPLAYS`
+    @async tmux_waiter(tmux)  # unstructured concurrency...
+
     return tmux
+end
+
+function tmux_waiter(tmux)
+    try
+        @debug "Waiting for $(tmux.waiter_path) to be closed."
+        read(tmux.waiter_fifo)
+    catch err
+        @error("`read(tmux.waiter_fifo)` failed", exception = (err, catch_backtrace()))
+    finally
+        @debug "Closing: $(sprint(show, "text/plain", tmux))"
+        try
+            close(tmux)
+        catch err
+            @error("`close(tmux)` failed", exception = (err, catch_backtrace()))
+        end
+    end
 end
 
 function cleanup_tmux(tmux)
@@ -157,13 +191,14 @@ function closeall()
     end
 end
 
-# TODO: get rid of this by using another FIFO used in the "opposite"
-# direction; i.e., the process inside `tmux` tries to _write_ to it
-# and then the Julia side tries to read.
+# TODO: get rid of this once I'm fine with `tmux_waiter`
 function cleanupall()
     lock(DISPLAYS) do d
         for (pane_id, tmux) in collect(d)
-            isopen(tmux) || close(tmux)
+            if !isopen(tmux)
+                @error "Unclosed pane found" tmux
+                close(tmux)
+            end
         end
     end
 end
