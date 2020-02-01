@@ -83,18 +83,42 @@ open_pipe(path::AbstractString) =
 
 make_tty(path::AbstractString) = Base.TTY(fd(Filesystem.open(path, Filesystem.JL_O_WRONLY)))
 
+as_pane_id(tmux::TmuxDisplay) = tmux.pane_id
+as_pane_id(id::AbstractString) = id
+as_pane_id(x) = error("Cannot interpret as tmux pane:\n", x)
+
 """
     TmuxDisplays.split_window() :: TmuxDisplay
 
 Use `tmux split-window` to create a new pane that is used as an
 external display.
+
+# Keyword Arguments
+- `horizontal::Bool = false`: Split pane horizontally if `true`.
+- `size::Integer`: Number of lines (for vertical split) or cells (for
+  horizontal split).
+- `target::Union{TmuxDisplay,AbstractString}`: Tmux pane to be split.
+  If it is a string, it is passed to `-t` option of `split-window` as-is.
+- `focus::Bool = false`: Focus newly created pane if `true`.
 """
-function split_window()
+function split_window(; horizontal = false, size = nothing, target = nothing, focus = false)
+    cmd = `tmux split-window`
+    if horizontal
+        cmd = `$cmd -h`
+    end
+    if size !== nothing
+        cmd = `$cmd -l $size`
+    end
+    if target !== nothing
+        cmd = `$cmd -t $(as_pane_id(target))`
+    end
+    if !focus
+        cmd = `$cmd -d`
+    end
+
     waiter_path = tmpfifo()
     cmd = `
-    tmux
-    split-window
-    -d
+    $cmd
     -P
     -F '#{pane_id} #{pane_pid} #{pane_tty}'
     "sleep 2147483647d > $waiter_path"
