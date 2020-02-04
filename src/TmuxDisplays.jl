@@ -101,7 +101,12 @@ external display.
   If it is a string, it is passed to `-t` option of `split-window` as-is.
 - `focus::Bool = false`: Focus newly created pane if `true`.
 """
-function split_window(; horizontal = false, size = nothing, target = nothing, focus = false)
+function split_window(;
+    horizontal = false,
+    size = nothing,
+    target = get(ENV, "TMUX_PANE", nothing),
+    focus = false,
+)
     cmd = `tmux split-window`
     if horizontal
         cmd = `$cmd -h`
