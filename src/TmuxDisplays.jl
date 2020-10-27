@@ -1,3 +1,16 @@
+"""
+    TmuxDisplays
+
+Using `tmux` as Julia's external displays.
+
+API:
+
+* `tmuxdisplay([object])`
+* `TmuxDisplays.split_window(; ...)`
+* `TmuxDisplays.new_window(; ...)`
+
+They all return a `TmuxDisplays` (`<: AbstractDisplay`).
+"""
 module TmuxDisplays
 
 export tmuxdisplay
@@ -93,6 +106,12 @@ as_pane_id(x) = error("Cannot interpret as tmux pane:\n", x)
 Use `tmux split-window` to create a new pane that is used as an
 external display.
 
+# Example
+
+```julia
+display(TmuxDisplays.split_window(), Text("hello"))
+```
+
 # Keyword Arguments
 - `horizontal::Bool = false`: Split pane horizontally if `true`.
 - `size::Integer`: Number of lines (for vertical split) or cells (for
@@ -128,6 +147,46 @@ function split_window(;
     -F '#{pane_id} #{pane_pid} #{pane_tty}'
     "sleep 2147483647d > $waiter_path"
     `
+    return tmux_run(cmd, waiter_path)
+end
+
+"""
+    TmuxDisplays.new_window(; [focus]) -> d::TmuxDisplay
+
+Open a new window in the current tmux session.
+
+# Example
+
+```julia
+display(TmuxDisplays.new_window(), Text("hello"))
+```
+
+# Keyword Arguments
+- `focus::Bool = true`: Focus newly created pane if `true` (default).
+- `name::String = "jl"`: Name of the window.
+"""
+function new_window(;
+    # TODO: add support for other options
+    focus = true,
+    name = "jl",
+)
+    cmd = `tmux new-window`
+    if !focus
+        cmd = `$cmd -d`
+    end
+
+    waiter_path = tmpfifo()
+    cmd = `
+    $cmd
+    -n $name
+    -P
+    -F '#{pane_id} #{pane_pid} #{pane_tty}'
+    "sleep 2147483647d > $waiter_path"
+    `
+    return tmux_run(cmd, waiter_path)
+end
+
+function  tmux_run(cmd, waiter_path)
     pane_id, pane_pid, pane_tty = split(read(cmd, String))
     tmux = TmuxDisplay(
         pane_id,
